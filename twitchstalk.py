@@ -61,7 +61,7 @@ async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_stalker(context)
     # /stream gorgc
     user = update.message.from_user
-    value = update.message.text.partition(' ')[2].strip().lower()
+    value = update.message.text.partition(' ')[2].strip().lower().replace(' ', '')
     re.sub('[^A-Za-z0-9]+', '', value)
     if not value:
         response_message = 'nothing to add'
@@ -76,7 +76,7 @@ async def game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_stalker(context)
     # /game dota2
     user = update.message.from_user
-    value = update.message.text.partition(' ')[2].strip().lower()
+    value = update.message.text.partition(' ')[2].strip().lower().replace(' ', '').replace('-', '').replace(':','')
     re.sub('[^A-Za-z0-9]+', '', value)
     if not value:
         response_message = 'nothing to add'
@@ -111,7 +111,7 @@ async def streamdel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_stalker(context)
     #streamdel gorgc
     user = update.message.from_user
-    value = update.message.text.partition(' ')[2].lower()
+    value = update.message.text.partition(' ')[2].lower().replace(' ', '')
     re.sub('[^A-Za-z0-9]+', '', value)
     #print(user, user['id'], value)
     streamers, games = context.user_data.get(user['id'], [set(), set()])
@@ -129,7 +129,7 @@ async def gamedel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_stalker(context)
     #gamedel dota2
     user = update.message.from_user
-    value = update.message.text.partition(' ')[2].lower()
+    value = update.message.text.partition(' ')[2].lower().replace(' ', '').replace('-','').replace(':','')
     re.sub('[^A-Za-z0-9]+', '', value)
     #print(user, user['id'], value)
     streamers, games = context.user_data.get(user['id'], [set(), set()])
@@ -200,7 +200,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
                 print('not live')
             if len(stream_data['data']) == 1:
                 orig_category = stream_data['data'][0]['game_name']
-                category = orig_category.lower()
+                category = orig_category.lower().replace(' ', '').replace('-','').replace(':','')
                 re.sub('[^A-Za-z0-9]+', '', category)
                 if category in game_set:
                     if previous_category[streamer_name] == category:
