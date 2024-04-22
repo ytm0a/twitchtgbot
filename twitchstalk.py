@@ -94,11 +94,11 @@ async def list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not streamers:
             response_message1 = 'Streamers: no streamers added'
         else:
-            response_message1 = f'Streamers: {', '.join(streamers)}'
+            response_message1 = f"Streamers: {', '.join(streamers)}"
         if not games:
             response_message2 = 'Categories: no categories added'
         else:
-            response_message2 = f'Categories: {', '.join(games)}'
+            response_message2 = f"Categories: {', '.join(games)}"
         response_message = response_message1 + '\n' + response_message2
     else:
         response_message = 'Your list is empty! Try adding streamers with /stream <streamer> command'
