@@ -211,7 +211,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
                         previous_category[streamer_name] = category
                         response_message = f'{streamer_name} is now streaming in \"{orig_category}\" category!'
                         print(response_message)
-                        response_message += f'twitch.tv/{streamer_name}'
+                        response_message += f' twitch.tv/{streamer_name}'
                         await context.bot.send_message(chat_id=user_id, text=response_message)
 
 '''
