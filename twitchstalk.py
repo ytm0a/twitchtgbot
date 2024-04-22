@@ -1,8 +1,19 @@
-import os, sys, requests, re
+import os, sys, re
+import asyncio
+from aiohttp import ClientSession
 from collections import defaultdict
 
 from telegram import Update
-from telegram.ext import filters, Application, ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, PicklePersistence, StringRegexHandler
+from telegram.ext import (
+    filters, 
+    Application, 
+    ApplicationBuilder, 
+    ContextTypes, 
+    CommandHandler, 
+    MessageHandler, 
+    PicklePersistence, 
+    StringRegexHandler
+)
 
 import logging
 
@@ -26,7 +37,7 @@ TOKEN = None
 with open(os.path.join(os.path.dirname(sys.argv[0]), 'token.txt'), 'r') as f:
     TOKEN = f.read().strip()
 
-previous_category = defaultdict(str)
+previous_category_dict = defaultdict(str)
 
 def run_stalker(context: ContextTypes.DEFAULT_TYPE):
     global stalk_running
@@ -155,64 +166,76 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.message.from_user
     stream_set, _ = context.user_data[user['id']]
+
     if not stream_set:
         response_message = 'nothing to check'
     else:
         response_list = []
-        for streamer_name in stream_set:
-            stream = requests.get('https://api.twitch.tv/helix/streams?user_login=' + streamer_name, headers=headers)
-            stream_data = stream.json()
-            print(streamer_name)
-            
-            if len(stream_data['data']) == 1:
-                category = stream_data['data'][0]['game_name']
-                response_list.append(f'{streamer_name} is now streaming in \"{category}\" category')
-            else:
-                response_list.append(f'{streamer_name} is not live')
-        response_message = "\n".join(response_list)
-    await update.message.reply_text(response_message)
+        async def get_stream_info(streamer_name, headers, response_list):
+            async with ClientSession() as session:
+                url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
+                async with session.get(url=url, headers=headers) as response:
+                    stream_data = await response.json()
+                    print(streamer_name)
+                    if len(stream_data['data']) == 1:
+                        print(stream_data['data'])
+                    else:
+                        print('not live')
+                    if len(stream_data['data']) == 1:
+                        category = stream_data['data'][0]['game_name']
+                        response_list.append(f'{streamer_name} is now streaming in \"{category}\" category')
+                    else:
+                        response_list.append(f'{streamer_name} is not live')
 
-#async def stalk_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#    global stalk_running
-#    if not stalk_running:
-#        context.job_queue.run_repeating(stalk, interval=60, first=3, data = context.user_data)
-#        stalk_running = True
+        tasks = []
+        for streamer_name in stream_set:
+            tasks.append(asyncio.create_task(get_stream_info(streamer_name, headers, response_list)))
+        for task in tasks:
+            await task
+        response_message = "\n".join(response_list)
+
+    await update.message.reply_text(response_message)
 
 async def stalk(context: ContextTypes.DEFAULT_TYPE):
     global twitch_client_id, twitch_access_token
-    global previous_category
+    global previous_category_dict
     headers = {
         'Client-ID': twitch_client_id,
         'Authorization': 'Bearer ' + twitch_access_token
     }
-    print('************')
-    print('JOB DONE')
-
     user_data = context.job.data
+
+    async def send_stream_notifications(streamer_name, headers):
+        global previous_category_dict
+        async with ClientSession() as session:
+            url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
+            async with session.get(url=url, headers=headers) as response:
+                stream_data = await response.json()
+                print(streamer_name)
+                if len(stream_data['data']) == 1:
+                    print(stream_data['data'])
+                else:
+                    print('not live')
+                if len(stream_data['data']) == 1:
+                    orig_category = stream_data['data'][0]['game_name']
+                    category = orig_category.lower().replace(' ', '').replace('-','').replace(':','')
+                    re.sub('[^A-Za-z0-9]+', '', category)
+                    if category in game_set:
+                        if previous_category_dict[streamer_name] != category:
+                            previous_category_dict[streamer_name] = category
+                            response_message = f'{streamer_name} is now streaming in \"{orig_category}\" category!'
+                            print(response_message)
+                            response_message += f' twitch.tv/{streamer_name}'
+                            await context.bot.send_message(chat_id=user_id, text=response_message)
+    print('************')
+    tasks = []
     for user_id in user_data:
         print('user: ', user_id)
         stream_set, game_set = user_data[user_id]
         for streamer_name in stream_set:
-            stream = requests.get('https://api.twitch.tv/helix/streams?user_login=' + streamer_name, headers=headers)
-            stream_data = stream.json()
-            print(streamer_name)
-            if len(stream_data['data']) == 1:
-                print(stream_data['data'])
-            else:
-                print('not live')
-            if len(stream_data['data']) == 1:
-                orig_category = stream_data['data'][0]['game_name']
-                category = orig_category.lower().replace(' ', '').replace('-','').replace(':','')
-                re.sub('[^A-Za-z0-9]+', '', category)
-                if category in game_set:
-                    if previous_category[streamer_name] == category:
-                        continue
-                    else:
-                        previous_category[streamer_name] = category
-                        response_message = f'{streamer_name} is now streaming in \"{orig_category}\" category!'
-                        print(response_message)
-                        response_message += f' twitch.tv/{streamer_name}'
-                        await context.bot.send_message(chat_id=user_id, text=response_message)
+            tasks.append(asyncio.create_task(send_stream_notifications(streamer_name, headers)))
+    for task in tasks:
+        await task
 
 '''
 async def streamclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
