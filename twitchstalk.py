@@ -189,6 +189,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
 
     user_data = context.job.data
     for user_id in user_data:
+        print('user: ', user_id)
         stream_set, game_set = user_data[user_id]
         for streamer_name in stream_set:
             stream = requests.get('https://api.twitch.tv/helix/streams?user_login=' + streamer_name, headers=headers)
