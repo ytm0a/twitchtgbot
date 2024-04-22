@@ -5,14 +5,12 @@ from collections import defaultdict
 
 from telegram import Update
 from telegram.ext import (
-    filters, 
-    Application, 
+    filters,
     ApplicationBuilder, 
     ContextTypes, 
     CommandHandler, 
     MessageHandler, 
-    PicklePersistence, 
-    StringRegexHandler
+    PicklePersistence
 )
 
 import logging
@@ -255,35 +253,25 @@ if __name__ == '__main__':
 
     job_queue = application.job_queue
 
-    start_handler = CommandHandler('start', start)
-    application.add_handler(start_handler)
+    application.add_handler(CommandHandler('start', start))
 
-    help_handler = CommandHandler('help', help)
-    application.add_handler(help_handler)
+    application.add_handler(CommandHandler('help', help))
 
-    stream_handler = CommandHandler('stream', stream)
-    application.add_handler(stream_handler)
+    application.add_handler(CommandHandler('stream', stream))
 
-    game_handler = CommandHandler('game', game)
-    application.add_handler(game_handler)
+    application.add_handler(CommandHandler('game', game))
 
-    delstream_handler = CommandHandler('streamdel', streamdel)
-    application.add_handler(delstream_handler)
+    application.add_handler(CommandHandler('streamdel', streamdel))
 
-    delgame_handler = CommandHandler('gamedel', gamedel)
-    application.add_handler(delgame_handler)
+    application.add_handler(CommandHandler('gamedel', gamedel))
 
-    list_handler = CommandHandler('list', list)
-    application.add_handler(list_handler)
+    application.add_handler(CommandHandler('list', list))
 
-    ls_handler = CommandHandler('ls', list)
-    application.add_handler(ls_handler)
+    application.add_handler(CommandHandler('ls', list))
 
-    check_handler = CommandHandler('check', check)
-    application.add_handler(check_handler)
+    application.add_handler(CommandHandler('check', check))
 
-    echo_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), echo)
-    application.add_handler(echo_handler)
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
 
     application.run_polling()
  
