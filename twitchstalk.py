@@ -6,6 +6,7 @@ from telegram.ext import filters, Application, ApplicationBuilder, ContextTypes,
 
 import logging
 
+STALK_JOB_INTERVAL = 300
 stalk_running = False
 
 twitch_client_id = ''
@@ -30,7 +31,7 @@ previous_category = defaultdict(str)
 def run_stalker(context: ContextTypes.DEFAULT_TYPE):
     global stalk_running
     if not stalk_running:
-        context.job_queue.run_repeating(stalk, interval=180, first=10, data = context.user_data)
+        context.job_queue.run_repeating(stalk, interval=STALK_JOB_INTERVAL, first=10, data = context.user_data)
         stalk_running = True
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
