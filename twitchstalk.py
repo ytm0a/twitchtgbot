@@ -205,7 +205,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
     }
     user_data = context.job.data
 
-    async def send_stream_notifications(streamer_name, headers):
+    async def send_stream_notifications(streamer_name, headers, user_id):
         global previous_category_dict
         async with ClientSession() as session:
             url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
@@ -233,7 +233,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
         print('user: ', user_id)
         stream_set, game_set = user_data[user_id]
         for streamer_name in stream_set:
-            tasks.append(asyncio.create_task(send_stream_notifications(streamer_name, headers)))
+            tasks.append(asyncio.create_task(send_stream_notifications(streamer_name, headers, user_id)))
     for task in tasks:
         await task
 
