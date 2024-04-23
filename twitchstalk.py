@@ -213,6 +213,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
                 if len(stream_data['data']) == 1:
                     print(stream_data['data'])
                 else:
+                    previous_category_dict[streamer_name] = ''
                     print('not live')
                 if len(stream_data['data']) == 1:
                     orig_category = stream_data['data'][0]['game_name']
