@@ -10,13 +10,13 @@ from telegram.ext import (
     ContextTypes, 
     CommandHandler, 
     MessageHandler, 
-    PicklePersistence
+    PicklePersistence,
+    CallbackContext
 )
 
 import logging
 
-STALK_JOB_INTERVAL = 300
-stalk_running = False
+STALK_JOB_INTERVAL = 3
 
 twitch_client_id = ''
 twitch_access_token = ''
@@ -37,21 +37,36 @@ with open(os.path.join(os.path.dirname(sys.argv[0]), 'token.txt'), 'r') as f:
 
 previous_category_dict = defaultdict(str)
 
-def run_stalker(context: ContextTypes.DEFAULT_TYPE):
-    global stalk_running
-    if not stalk_running:
-        context.job_queue.run_repeating(stalk, interval=STALK_JOB_INTERVAL, first=10, data = context.user_data)
-        stalk_running = True
+async def run_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    jobs = context.bot_data.setdefault('stalk_jobs', {})
+
+    if user_id in jobs:
+        return
+
+    job = context.job_queue.run_repeating(
+        stalk,
+        interval=STALK_JOB_INTERVAL,
+        first=10,
+        data=user_id
+    )
+    jobs[user_id] = job
+
+def remove_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    jobs = context.bot_data.get('stalk_jobs', {})
+    job = jobs.pop(user_id, None)
+    if job:
+        job.schedule_removal()
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
+    user_id = update.effective_user.id
+    await run_stalker_for_user(context, user_id)
     text_too_long = """Hello, I am bot! I'll send you a notification when your favourite streamer is playing your favourite game!
 Plese enable notifications after you set up your list!
 Type /help for more info"""
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text_too_long) # type: ignore
 
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     text_too_long = """/start - starting message
 /stream <streamer> - add streamer you want to follow
 /game <category> - add category you want to watch
@@ -64,30 +79,28 @@ Don't forget to enable notifications after you set up your list!"""
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text_too_long)
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Type /help for commands list")
 
 async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     # /stream gorgc
     user = update.message.from_user
     value = update.message.text.partition(' ')[2].strip().lower().replace(' ', '')
-    re.sub('[^A-Za-z0-9]+', '', value)
+    value = re.sub('[^A-Za-z0-9]+', '', value)
     if not value:
         response_message = 'nothing to add'
     else:
         streamers, games = context.user_data.get(user['id'], [set(), set()])
         streamers.add(value)
         context.user_data[user['id']] = (streamers, games)
+        await run_stalker_for_user(context, user['id'])
         response_message = f'streamer \"{value}\" added'
     await update.message.reply_text(response_message)
 
 async def game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     # /game dota2
     user = update.message.from_user
     value = update.message.text.partition(' ')[2].strip().lower().replace(' ', '').replace('-', '').replace(':','')
-    re.sub('[^A-Za-z0-9]+', '', value)
+    value = re.sub('[^A-Za-z0-9]+', '', value)
     if not value:
         response_message = 'nothing to add'
     else:
@@ -98,7 +111,6 @@ async def game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response_message)
 
 async def list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     # /list
     user = update.message.from_user
     if user['id'] in context.user_data:
@@ -118,11 +130,10 @@ async def list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response_message)
 
 async def streamdel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     #streamdel gorgc
     user = update.message.from_user
     value = update.message.text.partition(' ')[2].lower().replace(' ', '')
-    re.sub('[^A-Za-z0-9]+', '', value)
+    value = re.sub('[^A-Za-z0-9]+', '', value)
     #print(user, user['id'], value)
     streamers, games = context.user_data.get(user['id'], [set(), set()])
     if not value:
@@ -130,17 +141,18 @@ async def streamdel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif value in streamers:
         streamers.remove(value)
         response_message = value + ' deleted'
+        if not streamers:
+            await remove_stalker_for_user(context, user['id'])
     else:
         response_message = value + ' was not in your streamer list'
     context.user_data[user['id']] = (streamers, games)
     await update.message.reply_text(response_message)
 
 async def gamedel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     #gamedel dota2
     user = update.message.from_user
     value = update.message.text.partition(' ')[2].lower().replace(' ', '').replace('-','').replace(':','')
-    re.sub('[^A-Za-z0-9]+', '', value)
+    value = re.sub('[^A-Za-z0-9]+', '', value)
     #print(user, user['id'], value)
     streamers, games = context.user_data.get(user['id'], [set(), set()])
     if not value:
@@ -154,7 +166,6 @@ async def gamedel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response_message)
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
     #/check
     global twitch_client_id, twitch_access_token
     headers = {
@@ -174,6 +185,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
                 async with session.get(url=url, headers=headers) as response:
                     stream_data = await response.json()
+                    print(stream_data)
                     print(streamer_name)
                     if len(stream_data['data']) == 1:
                         print(stream_data['data'])
@@ -201,7 +213,9 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
         'Client-ID': twitch_client_id,
         'Authorization': 'Bearer ' + twitch_access_token
     }
-    user_data = context.job.data
+
+    user_id = context.job.data
+    print("USER_ID", user_id)
 
     async def send_stream_notifications(streamer_name, headers, user_id):
         global previous_category_dict
@@ -228,18 +242,24 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_message(chat_id=user_id, text=response_message)
     print('************')
     tasks = []
-    for user_id in user_data:
-        print('user: ', user_id)
-        stream_set, game_set = user_data[user_id]
-        for streamer_name in stream_set:
-            tasks.append(asyncio.create_task(send_stream_notifications(streamer_name, headers, user_id)))
+    print(context.application.user_data[user_id][user_id])
+
+    stream_set, game_set = context.application.user_data[user_id][user_id]
+    for streamer_name in stream_set:
+        tasks.append(asyncio.create_task(send_stream_notifications(streamer_name, headers, user_id)))
     for task in tasks:
         await task
 
-'''
-async def streamclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
 
+async def streamclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    _, games = context.user_data.get(user_id, [set(), set()])
+    context.user_data[user_id] = (set(), games)
+    await update.message.reply_text("cleared")
+
+
+    
+'''
 async def gameclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_stalker(context)
 
@@ -274,12 +294,11 @@ if __name__ == '__main__':
 
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
 
-    application.run_polling()
- 
-    '''streamclr_handler = CommandHandler('streamclr', streamclr)
-    application.add_handler(streamclr_handler)
+    application.add_handler(CommandHandler('streamclr', streamclr))
 
-    gameclr_handler = CommandHandler('gameclr', gameclr)
+    application.run_polling()
+    
+    '''gameclr_handler = CommandHandler('gameclr', gameclr)
     application.add_handler(gameclr_handler)
 
     clearall_handler = CommandHandler('clearall', clearall)
