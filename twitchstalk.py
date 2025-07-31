@@ -1,4 +1,6 @@
-import os, sys, re
+import os
+import sys
+import re
 import asyncio
 from aiohttp import ClientSession
 from collections import defaultdict
@@ -6,17 +8,19 @@ from collections import defaultdict
 from telegram import Update
 from telegram.ext import (
     filters,
-    ApplicationBuilder, 
-    ContextTypes, 
-    CommandHandler, 
-    MessageHandler, 
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
     PicklePersistence,
-    CallbackContext
 )
 
 import logging
 
-STALK_JOB_INTERVAL = 3
+STALK_JOB_INTERVAL = 300
+
+in_memory_jobs = {}
+previous_category_dict = defaultdict(str)
 
 twitch_client_id = ''
 twitch_access_token = ''
@@ -35,12 +39,18 @@ TOKEN = None
 with open(os.path.join(os.path.dirname(sys.argv[0]), 'token.txt'), 'r') as f:
     TOKEN = f.read().strip()
 
-previous_category_dict = defaultdict(str)
 
 async def run_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    jobs = context.bot_data.setdefault('stalk_jobs', {})
 
-    if user_id in jobs:
+    if user_id in in_memory_jobs:
+        return
+    
+    user_data = context.application.user_data.get(user_id)
+    if not user_data:
+        return
+
+    streamers, games = user_data.get(user_id, (set(), set()))
+    if not streamers or not games:
         return
 
     job = context.job_queue.run_repeating(
@@ -49,20 +59,28 @@ async def run_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int)
         first=10,
         data=user_id
     )
-    jobs[user_id] = job
+    in_memory_jobs[user_id] = job
+
 
 def remove_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    jobs = context.bot_data.get('stalk_jobs', {})
-    job = jobs.pop(user_id, None)
+    job = in_memory_jobs.pop(user_id, None)
     if job:
         job.schedule_removal()
+
+
+async def startup(application):
+    user_data = application.persistence.user_data
+
+    for user_id in user_data:
+        context = ContextTypes.DEFAULT_TYPE(application=application)
+        await run_stalker_for_user(context, user_id)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await run_stalker_for_user(context, user_id)
     text_too_long = """Hello, I am bot! I'll send you a notification when your favourite streamer is playing your favourite game!
-Plese enable notifications after you set up your list!
+❗Please enable notifications after you set up your list!
 Type /help for more info"""
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text_too_long) # type: ignore
 
@@ -74,47 +92,62 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /check - check status for all streamers
 /streamdel <streamer> - remove streamer from your list
 /gamedel <category> - remove category from your list
+/streamclr - remove all streamers
+/gameclr - remove all categories
 
 Don't forget to enable notifications after you set up your list!"""
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text_too_long)
 
+
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Type /help for commands list")
 
+
+def normalize_stream(name):
+    name = name.strip().lower().replace(' ', '')
+    name = re.sub('[^A-Za-z0-9]+', '', name)
+    return name
+
+def normalize_game(name):
+    name = name.strip().lower().replace(' ', '').replace('-', '').replace(':','')
+    name = re.sub('[^A-Za-z0-9]+', '', name)
+    return name
+
 async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # /stream gorgc
-    user = update.message.from_user
-    value = update.message.text.partition(' ')[2].strip().lower().replace(' ', '')
-    value = re.sub('[^A-Za-z0-9]+', '', value)
+    user_id = update.effective_user.id
+    value = normalize_stream(update.message.text.partition(' ')[2])
     if not value:
         response_message = 'nothing to add'
     else:
-        streamers, games = context.user_data.get(user['id'], [set(), set()])
+        streamers, games = context.user_data.get(user_id, [set(), set()])
         streamers.add(value)
-        context.user_data[user['id']] = (streamers, games)
-        await run_stalker_for_user(context, user['id'])
+        context.user_data[user_id] = (streamers, games)
+        await run_stalker_for_user(context, user_id)
         response_message = f'streamer \"{value}\" added'
     await update.message.reply_text(response_message)
 
+
 async def game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # /game dota2
-    user = update.message.from_user
-    value = update.message.text.partition(' ')[2].strip().lower().replace(' ', '').replace('-', '').replace(':','')
-    value = re.sub('[^A-Za-z0-9]+', '', value)
+    user_id = update.effective_user.id
+    value = normalize_game(update.message.text.partition(' ')[2])
     if not value:
         response_message = 'nothing to add'
     else:
-        streamers, games = context.user_data.get(user['id'], [set(), set()])
+        streamers, games = context.user_data.get(user_id, [set(), set()])
         games.add(value)
-        context.user_data[user['id']] = (streamers, games)
+        context.user_data[user_id] = (streamers, games)
+        await run_stalker_for_user(context, user_id)
         response_message = f'category \"{value}\" added'
     await update.message.reply_text(response_message)
 
+
 async def list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # /list
-    user = update.message.from_user
-    if user['id'] in context.user_data:
-        streamers, games = context.user_data[user['id']]
+    user_id = update.effective_user.id
+    if user_id in context.user_data:
+        streamers, games = context.user_data[user_id]
         if not streamers:
             response_message1 = 'Streamers: no streamers added'
         else:
@@ -129,41 +162,57 @@ async def list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #print(user, user['id'], value)
     await update.message.reply_text(response_message)
 
+
 async def streamdel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #streamdel gorgc
-    user = update.message.from_user
-    value = update.message.text.partition(' ')[2].lower().replace(' ', '')
-    value = re.sub('[^A-Za-z0-9]+', '', value)
-    #print(user, user['id'], value)
-    streamers, games = context.user_data.get(user['id'], [set(), set()])
+    user_id = update.effective_user.id
+    value = normalize_stream(update.message.text.partition(' ')[2])
+    #print(user, user_id, value)
+    streamers, games = context.user_data.get(user_id, [set(), set()])
     if not value:
         response_message = 'nothing to delete'
     elif value in streamers:
         streamers.remove(value)
         response_message = value + ' deleted'
         if not streamers:
-            await remove_stalker_for_user(context, user['id'])
+            remove_stalker_for_user(context, user_id)
     else:
         response_message = value + ' was not in your streamer list'
-    context.user_data[user['id']] = (streamers, games)
+    context.user_data[user_id] = (streamers, games)
     await update.message.reply_text(response_message)
+
 
 async def gamedel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #gamedel dota2
-    user = update.message.from_user
-    value = update.message.text.partition(' ')[2].lower().replace(' ', '').replace('-','').replace(':','')
-    value = re.sub('[^A-Za-z0-9]+', '', value)
-    #print(user, user['id'], value)
-    streamers, games = context.user_data.get(user['id'], [set(), set()])
+    user_id = update.effective_user.id
+    value = normalize_game(update.message.text.partition(' ')[2])
+    streamers, games = context.user_data.get(user_id, [set(), set()])
     if not value:
         response_message = 'nothing to add'
     elif value in games:
         games.remove(value)
         response_message = value + ' deleted'
+        if not games:
+            remove_stalker_for_user(context, user_id)
     else:
         response_message = value + ' was not in your category list'
-    context.user_data[user['id']] = (streamers, games)
+    context.user_data[user_id] = (streamers, games)
     await update.message.reply_text(response_message)
+
+async def streamclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    _, games = context.user_data.get(user_id, [set(), set()])
+    context.user_data[user_id] = (set(), games)
+    remove_stalker_for_user(context, user_id)
+    await update.message.reply_text("cleared")
+
+async def gameclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    streams, _ = context.user_data.get(user_id, [set(), set()])
+    context.user_data[user_id] = (streams, set())
+    remove_stalker_for_user(context, user_id)
+    await update.message.reply_text("cleared")
+
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #/check
@@ -173,13 +222,14 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'Authorization': 'Bearer ' + twitch_access_token
     }
 
-    user = update.message.from_user
-    stream_set, _ = context.user_data[user['id']]
+    user_id = update.effective_user.id
+    stream_set, _ = context.user_data[user_id]
 
     if not stream_set:
         response_message = 'nothing to check'
     else:
         response_list = []
+
         async def get_stream_info(streamer_name, headers, response_list):
             async with ClientSession() as session:
                 url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
@@ -196,7 +246,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         response_list.append(f'{streamer_name} is now streaming in \"{category}\" category')
                     else:
                         response_list.append(f'{streamer_name} is not live')
-
+        
         tasks = []
         for streamer_name in stream_set:
             tasks.append(asyncio.create_task(get_stream_info(streamer_name, headers, response_list)))
@@ -205,6 +255,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response_message = "\n".join(response_list)
 
     await update.message.reply_text(response_message)
+
 
 async def stalk(context: ContextTypes.DEFAULT_TYPE):
     global twitch_client_id, twitch_access_token
@@ -231,8 +282,8 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
                     print('not live')
                 if len(stream_data['data']) == 1:
                     orig_category = stream_data['data'][0]['game_name']
-                    category = orig_category.lower().replace(' ', '').replace('-','').replace(':','')
-                    re.sub('[^A-Za-z0-9]+', '', category)
+                    category = normalize_game(orig_category)
+
                     if category in game_set:
                         if previous_category_dict[streamer_name] != category:
                             previous_category_dict[streamer_name] = category
@@ -242,26 +293,15 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_message(chat_id=user_id, text=response_message)
     print('************')
     tasks = []
-    print(context.application.user_data[user_id][user_id])
+    print(context.application.user_data)
 
     stream_set, game_set = context.application.user_data[user_id][user_id]
     for streamer_name in stream_set:
         tasks.append(asyncio.create_task(send_stream_notifications(streamer_name, headers, user_id)))
     for task in tasks:
         await task
-
-
-async def streamclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    _, games = context.user_data.get(user_id, [set(), set()])
-    context.user_data[user_id] = (set(), games)
-    await update.message.reply_text("cleared")
-
-
-    
+ 
 '''
-async def gameclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    run_stalker(context)
 
 async def clearall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_stalker(context)
@@ -270,7 +310,13 @@ async def clearall(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     my_persistence = PicklePersistence(filepath=os.path.join(os.path.dirname(sys.argv[0]), 'data'))
-    application = ApplicationBuilder().token(TOKEN).persistence(persistence=my_persistence).build()
+    application = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .persistence(persistence=my_persistence)
+        .post_init(startup)
+        .build()
+    )
 
     job_queue = application.job_queue
 
@@ -296,12 +342,11 @@ if __name__ == '__main__':
 
     application.add_handler(CommandHandler('streamclr', streamclr))
 
+    application.add_handler(CommandHandler('gameclr', gameclr))
+
     application.run_polling()
     
-    '''gameclr_handler = CommandHandler('gameclr', gameclr)
-    application.add_handler(gameclr_handler)
+    '''
 
     clearall_handler = CommandHandler('clearall', clearall)
     application.add_handler(clearall_handler)'''
-    
-
