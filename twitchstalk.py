@@ -55,14 +55,14 @@ def get_user_data(context: ContextTypes.DEFAULT_TYPE, user_id: int):
                 'games': set()
             }
         return data[user_id]['streamers'], data[user_id]['games']
-
-    data = context.application.user_data[user_id]
-    if user_id not in data:
-        data[user_id] = {
-            'streamers': set(),
-            'games': set()
-            }
-    return data[user_id]['streamers'], data[user_id]['games']
+    if user_id in context.application.user_data:
+        data = context.application.user_data[user_id]
+        if user_id not in data:
+            data[user_id] = {
+                'streamers': set(),
+                'games': set()
+                }
+        return data[user_id]['streamers'], data[user_id]['games']
 
 async def run_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
 
