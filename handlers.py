@@ -11,6 +11,9 @@ from twitchstalk import (
     run_stalker_for_user,
     remove_stalker_for_user,
     get_user_data,
+)
+
+from config import (
     twitch_client_id,
     twitch_access_token
 )
@@ -155,14 +158,42 @@ async def gameclr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("cleared")
 
 
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    #/check
-    global twitch_client_id, twitch_access_token
+async def get_stream_status(session, streamer_name):
     headers = {
         'Client-ID': twitch_client_id,
         'Authorization': 'Bearer ' + twitch_access_token
     }
+    response_message = ''
+    url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
+    async with session.get(url=url, headers=headers) as response:
+        stream_data = await response.json()
+        print(stream_data)
+        print(streamer_name)
+        if len(stream_data['data']) == 1:
+            print(stream_data['data'])
+            category = stream_data['data'][0]['game_name']
+            response_message = f'{streamer_name} is now streaming in \"{category}\" category'
+        else:
+            print('not live')
+            response_message = f'{streamer_name} is not live'
+    return response_message
 
+async def gather_stream_info(streams):
+    response_list = []
+    async with ClientSession() as session:
+        tasks = []
+        for streamer_name in streams:
+            task = asyncio.create_task(get_stream_status(
+                session,
+                streamer_name,
+            ))
+            tasks.append(task)
+        response_list = await asyncio.gather(*tasks)
+    return response_list
+
+
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    #/check
     user_id = update.effective_user.id
     streams, _ = get_user_data(context, user_id)
     print(context.user_data)
@@ -171,30 +202,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not streams:
         response_message = 'nothing to check'
     else:
-        response_list = []
-
-        async def get_stream_info(streamer_name, headers, response_list):
-            async with ClientSession() as session:
-                url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
-                async with session.get(url=url, headers=headers) as response:
-                    stream_data = await response.json()
-                    print(stream_data)
-                    print(streamer_name)
-                    if len(stream_data['data']) == 1:
-                        print(stream_data['data'])
-                    else:
-                        print('not live')
-                    if len(stream_data['data']) == 1:
-                        category = stream_data['data'][0]['game_name']
-                        response_list.append(f'{streamer_name} is now streaming in \"{category}\" category')
-                    else:
-                        response_list.append(f'{streamer_name} is not live')
-        
-        tasks = []
-        for streamer_name in streams:
-            tasks.append(asyncio.create_task(get_stream_info(streamer_name, headers, response_list)))
-        for task in tasks:
-            await task
+        response_list = await gather_stream_info(streams)
         response_message = "\n".join(response_list)
 
     await update.message.reply_text(response_message)
