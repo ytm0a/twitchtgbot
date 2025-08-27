@@ -1,7 +1,6 @@
 import os
 import sys
-import asyncio
-from aiohttp import ClientSession
+
 from collections import defaultdict
 
 from telegram.ext import (
@@ -15,11 +14,9 @@ from telegram.ext import (
 
 import handlers
 
-from config import (
-    TOKEN,
-    twitch_client_id,
-    twitch_access_token,
-)
+from config import TOKEN
+
+from twitch_api import gather_stream_notifications
 
 import logging
 
@@ -30,14 +27,15 @@ logging.basicConfig(
 
 STALK_JOB_INTERVAL = 300
 
-in_memory_jobs = {}
-previous_category_dict = defaultdict(lambda: defaultdict(str))
+in_memory_jobs = defaultdict(str)
+
 
 async def startup(application):
     user_data = application.persistence.user_data
     for user_id in user_data:
         context = ContextTypes.DEFAULT_TYPE(application=application)
         await run_stalker_for_user(context, user_id)
+
 
 def get_user_data(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     if context.user_data:
@@ -84,48 +82,6 @@ def remove_stalker_for_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     if job:
         job.schedule_removal()
 
-
-async def get_fresh_category_from_stream(session, streamer_name, user_id, user_categories):
-    global previous_category_dict
-    headers = {
-        'Client-ID': twitch_client_id,
-        'Authorization': 'Bearer ' + twitch_access_token
-    }
-    url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
-    async with session.get(url=url, headers=headers) as response:
-        stream_data = await response.json()
-        print(streamer_name)
-        if len(stream_data['data']) != 1:
-            previous_category_dict[user_id][streamer_name] = ''
-            print('not live')
-        else:
-            print(stream_data['data'])
-            orig_category = stream_data['data'][0]['game_name']
-            category = handlers.normalize_game(orig_category)
-
-            if category in user_categories:
-                if previous_category_dict[user_id][streamer_name] != category:
-                    previous_category_dict[user_id][streamer_name] = category
-                    response_message = f'{streamer_name} is now streaming in \"{orig_category}\" category!'
-                    print(response_message)
-                    response_message += f' twitch.tv/{streamer_name}'
-                    return response_message
-
-async def gather_stream_notifications(streams, user_id, user_categories):
-    response_list = []
-    async with ClientSession() as session:
-        tasks = []
-        for streamer_name in streams:
-            task = asyncio.create_task(get_fresh_category_from_stream(
-                session,
-                streamer_name,
-                user_id,
-                user_categories
-                ))
-            tasks.append(task)
-        response_list = await asyncio.gather(*tasks)
-    return response_list
-                
 
 async def stalk(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
