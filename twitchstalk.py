@@ -14,7 +14,7 @@ from telegram.ext import (
 
 import handlers
 
-from config import TOKEN
+from config import BASE_DIR, TOKEN
 
 from twitch_api import gather_stream_notifications
 
@@ -98,7 +98,7 @@ async def stalk(context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     my_persistence = PicklePersistence(
-        filepath=os.path.join(os.path.dirname(sys.argv[0]), 'data')
+        filepath=os.path.join(BASE_DIR, 'data')
     )
     application = (
         ApplicationBuilder()

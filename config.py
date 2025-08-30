@@ -1,13 +1,13 @@
-import os, sys
+import os
+from dotenv import load_dotenv
 
-twitch_client_id = ''
-twitch_access_token = ''
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-with open(os.path.join(os.path.dirname(sys.argv[0]), 'twitchoath.txt'), 'r') as f:
-    twitch_client_id = f.readline().strip()
-with open(os.path.join(os.path.dirname(sys.argv[0]), 'twitch_access_token.txt'), 'r') as f:
-    twitch_access_token = f.readline().strip()
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
-TOKEN = None
-with open(os.path.join(os.path.dirname(sys.argv[0]), 'token.txt'), 'r') as f:
-    TOKEN = f.read().strip()
+twitch_client_id = os.getenv('TWITCH_CLIENT_ID')
+twitch_client_secret = os.getenv('TWITCH_CLIENT_SECRET')
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+
+if not (twitch_client_secret and twitch_client_id and TOKEN):
+    raise ValueError("Отсутствуют файлы конфигурации")

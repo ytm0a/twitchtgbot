@@ -1,24 +1,68 @@
-import asyncio
+import asyncio, time, os
 from aiohttp import ClientSession
 from collections import defaultdict
 
 from config import (
+    BASE_DIR,
     twitch_client_id,
-    twitch_access_token,
+    twitch_client_secret,
 )
 
 from utils import normalize_game
 
 previous_category_dict = defaultdict(lambda: defaultdict(str))
+twitch_access_token = ''
+token_expires_at = 0.0
 
+try:
+    with open(os.path.join(BASE_DIR, 'twitch_access_token.txt'), 'r') as f:
+        twitch_access_token = f.readline().strip()
+        token_expires_at = float(f.readline().strip())
+except Exception as e:
+    print('Не удалось прочитать twitch_access_token', e)
+
+async def get_new_token():
+    global twitch_access_token, token_expires_in
+    body = {
+        'client_id': twitch_client_id,
+        'client_secret': twitch_client_secret,
+        "grant_type": 'client_credentials'
+    }
+    url = 'https://id.twitch.tv/oauth2/token'
+    async with asyncio.Lock():
+        try:
+            async with ClientSession() as session:
+                async with session.post(url=url, data=body) as r:
+                    data = await r.json();
+                    access_token = data['access_token']
+                    expires_in = float(data['expires_in'])
+                    twitch_access_token = access_token
+                    token_expires_at = time.time() + expires_in
+                    try:
+                        with open(os.path.join(BASE_DIR, 'twitch_access_token.txt'), 'w') as f:
+                            f.write(str(twitch_access_token)+'\n')
+                            f.write(str(token_expires_at))
+                    except Exception as e:
+                        print('Не удалось записать в twitch_access_token.txt', e)
+        except Exception as e:
+            print('Ошибка при обновлении токена')
+            raise e
+
+async def check_twitch_access_token():
+    global twitch_access_token
+    if not twitch_access_token or (token_expires_at < time.time() + 300):
+        await get_new_token()
+    return twitch_access_token
 
 async def get_fresh_category_from_stream(session, streamer_name, user_id, user_categories):
-    global previous_category_dict
+    global previous_category_dict, twitch_access_token
+    twitch_access_token = await check_twitch_access_token()
     headers = {
         'Client-ID': twitch_client_id,
         'Authorization': 'Bearer ' + twitch_access_token
     }
     url = 'https://api.twitch.tv/helix/streams?user_login=' + streamer_name
+
     try:
         async with session.get(url=url, headers=headers) as response:
             stream_data = await response.json()
@@ -59,6 +103,8 @@ async def gather_stream_notifications(streams, user_id, user_categories):
 
 
 async def get_stream_status(session, streamer_name, user_id):
+    global twitch_access_token
+    twitch_access_token = await check_twitch_access_token()
     headers = {
         'Client-ID': twitch_client_id,
         'Authorization': 'Bearer ' + twitch_access_token
