@@ -10,4 +10,4 @@ twitch_client_secret = os.getenv('TWITCH_CLIENT_SECRET')
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
 if not (twitch_client_secret and twitch_client_id and TOKEN):
-    raise ValueError("Отсутствуют файлы конфигурации")
+    raise ValueError("Failed to load configuration")

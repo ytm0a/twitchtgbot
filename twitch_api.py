@@ -19,7 +19,7 @@ try:
         twitch_access_token = f.readline().strip()
         token_expires_at = float(f.readline().strip())
 except Exception as e:
-    print('Не удалось прочитать twitch_access_token', e)
+    print('Failed to read twitch_access_token', e)
 
 async def get_new_token():
     global twitch_access_token, token_expires_in
@@ -43,13 +43,13 @@ async def get_new_token():
                             f.write(str(twitch_access_token)+'\n')
                             f.write(str(token_expires_at))
                     except Exception as e:
-                        print('Не удалось записать в twitch_access_token.txt', e)
+                        print('Failed to write in twitch_access_token.txt', e)
         except Exception as e:
-            print('Ошибка при обновлении токена')
+            print('Error updating token')
             raise e
 
 async def check_twitch_access_token():
-    global twitch_access_token
+    global twitch_access_token, token_expires_at
     if not twitch_access_token or (token_expires_at < time.time() + 300):
         await get_new_token()
     return twitch_access_token
